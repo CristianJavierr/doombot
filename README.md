@@ -3,7 +3,7 @@
 Bot independiente para esta película en **Plaza Internacional Santiago**:
 https://rd.caribbeancinemas.com/plaza-internacional-santiago/movie/avengers-doomsday/
 
-Abre la página con Chromium, ejecuta su JavaScript y comprueba la cartelera cada **60 segundos**. Envía avisos a **un número de WhatsApp**. Preparado para un servidor Linux con Docker Compose; no necesita puertos públicos.
+Abre la página con Chromium, ejecuta su JavaScript y envía avisos a **un número de WhatsApp**. Puede ejecutarse **cada cinco minutos en GitHub Actions** sin administrar un servidor, o cada 60 segundos en un servidor Linux con Docker Compose.
 
 ## Qué detecta
 
@@ -12,9 +12,38 @@ Abre la página con Chromium, ejecuta su JavaScript y comprueba la cartelera cad
 - `available`: hay al menos un botón de horario habilitado; avisa con el enlace para revisar/comprar.
 - `unknown`/error: página incompleta, sucursal/película incorrecta, bloqueo, caída o estructura desconocida. Lo registra sin anunciar boletas.
 
-Exige **dos revisiones consecutivas** antes de avisar: normalmente detecta el cambio en aproximadamente 1–2 minutos más la carga de la página. Para avisar en la primera revisión, configura `CONFIRMATIONS=1`.
+En Docker, exige **dos revisiones consecutivas** antes de avisar: normalmente detecta el cambio en aproximadamente 1–2 minutos más la carga de la página. Para avisar en la primera revisión, configura `CONFIRMATIONS=1`.
 
 El bot verifica la película y la sucursal, ignora cambios en trailers/carteles y no compra ni reserva asientos. Un botón habilitado es una señal de compra disponible, no una garantía de inventario hasta completar el proceso del cine.
+
+## GitHub Actions: cada cinco minutos
+
+[Ver ejecuciones del monitor](https://github.com/CristianJavierr/doombot/actions/workflows/monitor.yml).
+
+El workflow `.github/workflows/monitor.yml` ejecuta `python monitor.py --once` en un runner estándar Ubuntu. La programación es `2-57/5 * * * *` (minutos 02, 07, 12… 57 de cada hora). No necesitas Vercel, tarjeta para pagar cómputo ni mantener tu computadora encendida. Las ejecuciones estándar son gratuitas mientras el repositorio sea público; se mantiene una caché pequeña de dependencias y Chromium, sin acumular artefactos de cada revisión.
+
+En este modo se usa `CONFIRMATIONS=1`: avisa en la primera revisión que encuentre un horario reconocido, después de esperar que la página se estabilice. La revisión puede retrasarse por la cola de GitHub; no garantiza detectar en exactamente cinco minutos. Consulta [límites de programación](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule) y [uso gratuito](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
+
+Configuración en **Settings → Secrets and variables → Actions → Repository secrets**:
+
+- `CALLMEBOT_PHONE`: tu número internacional activado.
+- `CALLMEBOT_API_KEY`: la clave válida de CallMeBot para ese número.
+
+Estos secretos solo se pasan a los pasos que envían mensajes; no se escriben en archivos públicos. La configuración inicial se puede cargar desde tu `.env` local con `gh secret set NOMBRE` por entrada estándar, sin publicarlo en Git.
+
+El historial persiste en la rama **`codex/monitor-state`**, con un único archivo `state.json`. Solo contiene la URL pública, estados, fechas, contadores y avisos aceptados; se validan sus campos antes de publicarlos. Nunca contiene teléfono, clave, HTML ni mensajes personales. No borres esa rama: si falta o no puede recuperarse, la ejecución falla sin reiniciar la deduplicación. Los cambios de historial se guardan incluso si falla una lectura o un envío. No se permiten ejecuciones simultáneas ni sobrescrituras de cambios concurrentes.
+
+Para probarlo desde **Actions → Monitor de boletas → Run workflow**, selecciona la rama predeterminada y marca **Enviar también un WhatsApp de prueba**. También puedes usar:
+
+```bash
+gh workflow run monitor.yml --repo CristianJavierr/doombot -f test_notification=true
+```
+
+La prueba de WhatsApp es independiente de la lectura: si CallMeBot la rechaza, el workflow registra el fallo y aun así intenta revisar la cartelera. Una revisión exitosa sin funciones no demuestra que WhatsApp esté funcionando. Revisa que la prueba llegue antes de confiar en los avisos.
+
+Para detenerlo, usa **Actions → Monitor de boletas → … → Disable workflow**. Para reanudarlo, pulsa **Enable workflow**. GitHub puede desactivar programaciones de repositorios públicos tras 60 días sin actividad; revisa la pestaña Actions si deja de ejecutarse. El workflow debe estar en la rama predeterminada.
+
+Esta modalidad no se despliega como una aplicación web en Vercel. El script original es un proceso de monitoreo; cambiarle el nombre a `app.py` no lo convierte en una función HTTP.
 
 ## WhatsApp gratis: CallMeBot
 
@@ -118,4 +147,4 @@ En Linux sin las bibliotecas de Chromium, ejecuta `playwright install --with-dep
 
 Cubren detección, estados incompletos, confirmaciones, errores de lectura/envío, reintentos, persistencia, deduplicación, salud y las solicitudes a ambos proveedores con respuestas simuladas. No envían WhatsApps reales.
 
-La configuración por sí sola no despliega el bot: faltan un servidor y la activación/clave de tu número. La lectura de la página sí puede probarse antes de configurar WhatsApp.
+Para GitHub Actions necesitas el workflow habilitado, su rama de historial y secretos válidos. Docker requiere además un servidor. En ambos casos, el envío depende de una activación válida de CallMeBot; la lectura de la página puede probarse antes de configurar WhatsApp.

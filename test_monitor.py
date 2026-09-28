@@ -97,6 +97,21 @@ class MonitorTests(unittest.TestCase):
         self.cycle()
         self.sender.assert_not_called()
 
+    def test_once_resumes_recent_confirmations_but_discards_stale_ones(self):
+        self.cycle(now=1000)
+        self.assertEqual(m.load_state(self.config, resume_candidate=True, now=1060)["count"], 1)
+        self.assertEqual(m.load_state(self.config, resume_candidate=True, now=2000)["count"], 0)
+
+    def test_once_exits_after_one_cycle_and_closes_browser(self):
+        for successful in [True, False]:
+            with self.subTest(successful=successful), patch("sys.argv", ["monitor.py", "--once"]), \
+                 patch.object(m.Config, "from_env", return_value=self.config), \
+                 patch("monitor.validate_notifier"), patch("monitor.PageReader") as reader, \
+                 patch("monitor.run_cycle", return_value=successful) as cycle:
+                self.assertEqual(m.main(), 0 if successful else 1)
+                cycle.assert_called_once()
+                reader.return_value.close.assert_called_once()
+
     def test_healthcheck_reports_stale_or_failed_notification(self):
         with patch("monitor.time.time", return_value=1000):
             self.assertEqual(m.healthcheck(self.config), 1)

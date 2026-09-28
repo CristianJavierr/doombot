@@ -169,7 +169,7 @@ def atomic_json(path: Path, data: dict):
     temporary.replace(path)
 
 
-def load_state(config):
+def load_state(config, resume_candidate=False, now=None):
     path = config.data_dir / "state.json"
     if not path.exists():
         return {"url": config.url, "sent": [], "candidate": None, "count": 0}
@@ -178,8 +178,10 @@ def load_state(config):
         raise ValueError("state.json inválido; revisar antes de reiniciar para evitar avisos duplicados.")
     if state.get("url") != config.url:
         raise ValueError("El estado pertenece a otra URL; usa otro DATA_DIR.")
-    # Las confirmaciones deben ser consecutivas y recientes, incluso tras reinicios.
-    state.update(candidate=None, count=0)
+    # --once puede reanudar confirmaciones de una ejecución programada reciente.
+    age = (time.time() if now is None else now) - state.get("last_success", 0)
+    if not resume_candidate or not 0 <= age <= config.interval * 3:
+        state.update(candidate=None, count=0)
     return state
 
 
@@ -309,7 +311,7 @@ def run_cycle(config, state, reader, sender=send_notification, now=None):
         state.update(retry_after=0, notification_error=False, notification_accepted_at=now)
         atomic_json(config.data_dir / "state.json", state)
         LOG.info("Proveedor aceptó el aviso de %s.", event)
-    return True
+    return not state.get("notification_error", False)
 
 
 def healthcheck(config):
@@ -329,6 +331,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--check", action="store_true", help="Revisar una vez sin enviar ni cambiar estado de avisos")
+    group.add_argument("--once", action="store_true", help="Revisar, notificar si corresponde, guardar estado y terminar")
     group.add_argument("--test-notification", action="store_true", help="Enviar un mensaje de prueba real")
     group.add_argument("--healthcheck", action="store_true")
     args = parser.parse_args()
@@ -354,7 +357,9 @@ def main():
             if args.check:
                 print(json.dumps(asdict(reader.read()), ensure_ascii=False, indent=2))
                 return 0
-            state = load_state(config)
+            state = load_state(config, resume_candidate=args.once)
+            if args.once:
+                return 0 if run_cycle(config, state, reader) else 1
             LOG.info("Monitor iniciado: intervalo=%ss, confirmaciones=%s, proveedor=%s.",
                      config.interval, config.confirmations, config.notifier)
             while not STOP.is_set():
