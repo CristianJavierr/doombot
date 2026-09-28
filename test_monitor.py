@@ -128,11 +128,9 @@ class MonitorTests(unittest.TestCase):
                 m.send_notification(self.config, "test")
 
     @patch.dict("os.environ", {"CALLMEBOT_PHONE": "12345678901234@lid", "CALLMEBOT_API_KEY": "test-key"})
-    def test_callmebot_accepts_provider_lid_and_encodes_it(self):
-        m.validate_notifier(self.config)
-        with patch("monitor.http_request", return_value="Message queued") as request:
-            m.send_notification(self.config, "Test")
-            self.assertIn("phone=12345678901234%40lid", request.call_args.args[0].full_url)
+    def test_callmebot_rejects_lid_with_actionable_error(self):
+        with self.assertRaisesRegex(ValueError, "activación válida"):
+            m.validate_notifier(self.config)
 
     @patch.dict("os.environ", {"CALLMEBOT_PHONE": "12345678901234@other", "CALLMEBOT_API_KEY": "test-key"})
     def test_callmebot_rejects_unknown_destination_format(self):

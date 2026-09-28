@@ -221,17 +221,19 @@ def validate_notifier(config):
     for name in fields[config.notifier]:
         required_env(name)
     phone = required_env("CALLMEBOT_PHONE" if config.notifier == "callmebot" else "META_TO")
-    phone_pattern = r"\+?[1-9]\d{7,14}"
-    if config.notifier == "callmebot":
-        # Algunas activaciones nuevas devuelven un identificador de WhatsApp @lid.
-        phone_pattern = rf"(?:{phone_pattern}|[1-9]\d{{7,19}}@lid)"
-    if not re.fullmatch(phone_pattern, phone):
-        raise ValueError("Destino inválido: usa el número internacional o el identificador @lid de CallMeBot.")
+    if config.notifier == "callmebot" and phone.endswith("@lid"):
+        raise ValueError("CallMeBot devolvió un ID @lid, pero su API no acepta ese formato. Necesitas una activación válida para tu número internacional.")
+    if not re.fullmatch(r"\+?[1-9]\d{7,14}", phone):
+        raise ValueError("Número inválido: usa código de país y dígitos, sin espacios.")
     if config.notifier == "meta":
         if not re.fullmatch(r"v\d+\.\d+", required_env("META_GRAPH_VERSION")):
             raise ValueError("META_GRAPH_VERSION debe tener formato vNN.0.")
         if not required_env("META_PHONE_NUMBER_ID").isdigit():
             raise ValueError("META_PHONE_NUMBER_ID debe ser numérico.")
+
+
+class NotificationError(RuntimeError):
+    """Error del proveedor con mensaje seguro: sin claves, teléfonos ni URLs privadas."""
 
 
 def http_request(request):
@@ -240,9 +242,9 @@ def http_request(request):
             return response.read(128_000).decode("utf-8")
     except HTTPError as error:
         # No imprimir URL, cuerpo ni exception: pueden incluir claves y teléfonos.
-        raise RuntimeError(f"Proveedor rechazó el envío: HTTP {error.code}.") from None
+        raise NotificationError(f"Proveedor rechazó el envío: HTTP {error.code}.") from None
     except (URLError, TimeoutError, OSError):
-        raise RuntimeError("Fallo de red al enviar; se reintentará. Entrega incierta.") from None
+        raise NotificationError("Fallo de red al enviar; se reintentará. Entrega incierta.") from None
 
 
 def send_notification(config, message):
@@ -253,9 +255,9 @@ def send_notification(config, message):
         # CallMeBot también devuelve errores dentro de respuestas HTTP 200.
         plain = re.sub(r"<[^>]+>", " ", response).lower()
         if re.search(r"\b(error|failed|invalid|not sent|not activated)\b", plain):
-            raise RuntimeError("CallMeBot rechazó el mensaje; revisa activación y clave.")
+            raise NotificationError("CallMeBot rechazó el mensaje; revisa activación y clave.")
         if not re.search(r"message\s+(?:has been\s+)?(?:queued|sent)|successfully\s+sent", plain):
-            raise RuntimeError("Respuesta no reconocida de CallMeBot; entrega no confirmada.")
+            raise NotificationError("Respuesta no reconocida de CallMeBot; entrega no confirmada.")
     else:
         version = required_env("META_GRAPH_VERSION")
         phone_id = required_env("META_PHONE_NUMBER_ID")
@@ -275,7 +277,7 @@ def send_notification(config, message):
                               "Content-Type": "application/json"})
         response = json.loads(http_request(request))
         if not response.get("messages", [{}])[0].get("id"):
-            raise RuntimeError("Meta no confirmó la aceptación del mensaje.")
+            raise NotificationError("Meta no confirmó la aceptación del mensaje.")
 
 
 def run_cycle(config, state, reader, sender=send_notification, now=None):
@@ -301,7 +303,7 @@ def run_cycle(config, state, reader, sender=send_notification, now=None):
         except Exception as error:
             state.update(retry_after=now + config.retry, notification_error=True)
             atomic_json(config.data_dir / "state.json", state)
-            LOG.error("Aviso no confirmado (%s); reintento en %ss.", type(error).__name__, config.retry)
+            LOG.error("Aviso no confirmado (%s); reintento en %ss.", str(error) if isinstance(error, NotificationError) else type(error).__name__, config.retry)
             return False
         state["sent"].append(event)
         state.update(retry_after=0, notification_error=False, notification_accepted_at=now)
@@ -367,6 +369,9 @@ def main():
 if __name__ == "__main__":
     try:
         sys.exit(main())
+    except NotificationError as error:
+        LOG.error("WhatsApp: %s", error)
+        sys.exit(1)
     except ValueError as error:
         LOG.error("Configuración: %s", error)
         sys.exit(1)

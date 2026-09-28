@@ -33,7 +33,7 @@ CALLMEBOT_API_KEY=tu_clave
 
 El teléfono del ejemplo es ficticio. Usa tu número con código de país, sin espacios ni guiones. No compartas la clave ni subas `.env` a Git; ya está excluido de Git y de la imagen Docker. El teléfono, el texto del aviso y la clave se transmiten a CallMeBot por HTTPS al enviar.
 
-Si CallMeBot devuelve un identificador terminado en `@lid` en el parámetro `phone` del enlace de activación, copia ese identificador completo en `CALLMEBOT_PHONE` en lugar del número. El bot admite ambos formatos.
+Si la activación de CallMeBot devuelve un identificador terminado en `@lid`, no lo uses como teléfono: en la prueba de integración su API respondió `Phone number format is incorrect`. Con el número real, la misma clave fue rechazada. Necesitas una activación válida para tu número internacional; vuelve a enviar la frase de autorización o consulta al proveedor si persiste. Cambiar el formato del identificador no corrige una clave asociada incorrectamente.
 
 ## Ejecutar en el servidor
 
